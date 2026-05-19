@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VibeFlow - 智能氛围音乐播放器</title>
+<style>
+/* ============================================================
+   CSS Reset & Variables - 赛博朋克/蒸汽波暗色主题
+   ============================================================ */
+:root {
+  --bg-deep: #06060f;
+  --bg-surface: #0d0d1f;
+  --bg-card: rgba(16, 16, 40, 0.65);
+  --text-primary: #e8e8f8;
+  --text-secondary: #9898c0;
+  --text-muted: #6868a0;
+  --accent-purple: #a855f7;
+  --accent-cyan: #06b6d4;
+  --accent-pink: #ec4899;
+  --accent-amber: #f59e0b;
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glow-purple: 0 0 20px rgba(168, 85, 247, 0.35);
+  --glow-cyan: 0 0 20px rgba(6, 182, 212, 0.35);
+  --glow-pink: 0 0 20px rgba(236, 72, 153, 0.35);
+  --radius: 14px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-deep);
+  background-image:
+    linear-gradient(rgba(168,85,247,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(168,85,247,0.025) 1px, transparent 1px);
+  background-size: 44px 44px;
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Subtle animated background glow */
+body::before {
+  content: '';
+  position: fixed; top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: radial-gradient(ellipse at 30% 20%, rgba(168,85,247,0.06) 0%, transparent 50%),
+              radial-gradient(ellipse at 70% 60%, rgba(6,182,212,0.05) 0%, transparent 50%),
+              radial-gradient(ellipse at 50% 80%, rgba(236,72,153,0.04) 0%, transparent 50%);
+  pointer-events: none; z-index: 0;
+  animation: bgShift 20s ease-in-out infinite;
+}
+@keyframes bgShift {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(1%, -1%); }
+  66% { transform: translate(-1%, 1%); }
+}
+
+/* ============================================================
+   App Layout
+   ============================================================ */
+#app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  z-index: 1;
+}
+
+/* Danmaku layer - top overlay */
+#danmaku-layer {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 160px;
+  z-index: 10;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.danmaku-item {
+  position: absolute;
+  white-space: nowrap;
+  font-weight: 700;
+  text-shadow: 0 0 8px currentColor, 0 0 16px currentColor;
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* Main two-column layout */
+#main-container {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  gap: 16px;
+  padding: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================================
+   Chat Panel (Left ~30%)
+   ============================================================ */
+#chat-panel {
+  width: 30%;
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--glow-purple), inset 0 1px 0 rgba(255,255,255,0.03);
+  overflow: hidden;
+}
+
+#chat-header {
+  padding: 14px 18px;
+  font-size: 15px;
+  font-weight: 700;
+  background: linear-gradient(135deg, rgba(168,85,247,0.2), rgba(6,182,212,0.1));
+  border-bottom: 1px solid var(--glass-border);
+  color: transparent;
+  background-clip: text;
+  -webkit-background-clip: text;
+  background-image: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
+  letter-spacing: 0.5px;
+}
+
+#chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-behavior: smooth;
+}
+#chat-messages::-webkit-scrollbar { width: 4px; }
+#chat-messages::-webkit-scrollbar-track { background: transparent; }
+#chat-messages::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.3); border-radius: 4px; }
+
+.chat-msg {
+  max-width: 92%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  animation: msgIn 0.3s ease-out;
+}
+@keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.chat-msg.user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, rgba(168,85,247,0.3), rgba(236,72,153,0.2));
+  border: 1px solid rgba(168,85,247,0.25);
+  color: var(--text-primary);
+}
+
+.chat-msg.agent {
+  align-self: flex-start;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+}
+
+.chat-msg.agent .song-rec {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, rgba(6,182,212,0.2), rgba(168,85,247,0.2));
+  border: 1px solid rgba(6,182,212,0.3);
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.chat-msg.agent .song-rec:hover {
+  box-shadow: 0 0 16px rgba(6,182,212,0.4);
+  transform: scale(1.02);
+}
+
+#chat-input-area {
+  display: flex;
+  padding: 10px 14px;
+  border-top: 1px solid var(--glass-border);
+  gap: 8px;
+}
+#chat-input {
+  flex: 1;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+#chat-input:focus { border-color: var(--accent-purple); }
+#chat-input::placeholder { color: var(--text-muted); }
+
+#chat-send {
+  padding: 10px 18px;
+  background: linear-gradient(135deg, var(--accent-purple), var(--accent-pink));
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+#chat-send:hover { box-shadow: 0 0 20px rgba(168,85,247,0.5); transform: scale(1.03); }
+
+/* ============================================================
+   Player Panel (Right ~70%)
+   ============================================================ */
+#player-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--glow-cyan);
+  padding: 24px;
+  position: relative;
+}
+
+/* Album art canvas */
+#album-art {
+  width: 160px;
+  height: 160px;
+  border-radius: 16px;
+  box-shadow: 0 0 30px rgba(168,85,247,0.2), 0 0 60px rgba(6,182,212,0.1);
+  border: 2px solid rgba(255,255,255,0.08);
+}
+
+/* Song info */
+#song-info { text-align: center; }
+#song-name {
+  font-size: 20px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 4px;
+}
+#song-tags {
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+/* Visualizer canvas */
+#visualizer {
+  width: 100%;
+  max-width: 560px;
+  height: 140px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.05);
+  background: rgba(0,0,0,0.3);
+}
+
+/* Player controls */
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.ctrl-btn {
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+.ctrl-btn:hover { box-shadow: 0 0 18px rgba(168,85,247,0.45); border-color: rgba(168,85,247,0.4); }
+.ctrl-btn.play-btn { width: 56px; height: 56px; font-size: 22px; background: linear-gradient(135deg, rgba(168,85,247,0.35), rgba(236,72,153,0.25)); }
+
+/* Progress bar */
+#progress-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 400px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+#progress-bar {
+  flex: 1;
+  height: 5px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+}
+#progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan), var(--accent-pink));
+  border-radius: 3px;
+  transition: width 0.3s linear;
+}
+#progress-bar:hover { height: 8px; }
+
+/* Volume slider */
+#volume-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+#volume-slider {
+  -webkit-appearance: none;
+  width: 120px;
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  outline: none;
+}
+#volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--accent-purple);
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(168,85,247,0.6);
+}
+
+/* Song selector pills */
+#song-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  max-width: 500px;
+}
+.song-pill {
+  padding: 5px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.song-pill:hover { border-color: rgba(168,85,247,0.4); color: var(--text-primary); }
+.song-pill.active { background: rgba(168,85,247,0.2); border-color: var(--accent-purple); color: var(--accent-purple); font-weight: 600; }
+
+/* ============================================================
+   Responsive - Mobile (<768px)
+   ============================================================ */
+@media (max-width: 768px) {
+  #main-container {
+    flex-direction: column;
+    gap: 10px;
+    padding: 8px;
+  }
+  #chat-panel {
+    width: 100%;
+    min-width: 0;
+    max-height: 40vh;
+    order: 2;
+  }
+  #player-panel {
+    order: 1;
+    padding: 16px;
+  }
+  #album-art { width: 120px; height: 120px; }
+  #visualizer { height: 100px; }
+  #danmaku-layer { height: 100px; }
+  .ctrl-btn { width: 38px; height: 38px; font-size: 15px; }
+  .ctrl-btn.play-btn { width: 46px; height: 46px; font-size: 18px; }
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- 弹幕层 -->
+  <div id="danmaku-layer"></div>
+
+  <!-- 主体两栏布局 -->
+  <div id="main-container">
+    <!-- 左侧：Agent 聊天面板 -->
+    <div id="chat-panel">
+      <div id="chat-header">🤖 VibeFlow Agent</div>
+      <div id="chat-messages">
+        <div class="chat-msg agent">
+          嗨！我是 VibeFlow 的 AI 音乐助手 🎵<br>
+          告诉我你的心情或场景，我为你推荐最合适的氛围音乐。<br>
+          试试输入「我需要专注学习」「下雨天好忧郁」「派对嗨起来」~
+        </div>
+      </div>
+      <div id="chat-input-area">
+        <input id="chat-input" type="text" placeholder="描述你的心情或场景..." maxlength="200">
+        <button id="chat-send">发送</button>
+      </div>
+    </div>
+
+    <!-- 右侧：播放器面板 -->
+    <div id="player-panel">
+      <canvas id="album-art" width="320" height="320"></canvas>
+      <div id="song-info">
+        <div id="song-name">选择一首歌曲</div>
+        <div id="song-tags"></div>
+      </div>
+
+      <canvas id="visualizer" width="560" height="140"></canvas>
+
+      <div id="song-pills"></div>
+
+      <div id="controls">
+        <button class="ctrl-btn" id="btn-prev" title="上一首">⏮</button>
+        <button class="ctrl-btn play-btn" id="btn-play" title="播放">▶️</button>
+        <button class="ctrl-btn" id="btn-next" title="下一首">⏭</button>
+      </div>
+
+      <div id="progress-container">
+        <span id="progress-current">0:00</span>
+        <div id="progress-bar">
+          <div id="progress-fill"></div>
+        </div>
+        <span id="progress-duration">3:00</span>
+      </div>
+
+      <div id="volume-container">
+        <span>🔊</span>
+        <input type="range" id="volume-slider" min="0" max="100" value="70">
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   VibeFlow - 智能氛围音乐播放器
+   纯 Web Audio API 音乐合成 + Canvas 可视化 + 弹幕系统
+   ============================================================ */
+
+// ===================== 音符频率表 =====================
+const NOTE = {
+  'C2':65.41,'Cs2':69.30,'D2':73.42,'Eb2':77.78,'E2':82.41,'F2':87.31,'Fs2':92.50,
+  'G2':98.00,'Ab2':103.83,'A2':110.00,'Bb2':116.54,'B2':123.47,
+  'C3':130.81,'Cs3':138.59,'D3':146.83,'Eb3':155.56,'E3':164.81,'F3':174.61,
+  'Fs3':185.00,'G3':196.00,'Ab3':207.65,'A3':220.00,'Bb3':233.08,'B3':246.94,
+  'C4':261.63,'Cs4':277.18,'D4':293.66,'Eb4':311.13,'E4':329.63,'F4':349.23,
+  'Fs4':369.99,'G4':392.00,'Ab4':415.30,'A4':440.00,'Bb4':466.16,'B4':493.88,
+  'C5':523.25,'D5':587.33,'E5':659.25,'F5':698.46,'G5':783.99,'A5':880.00,
+  'B5':987.77,'C6':1046.50,
+};
+
+// ===================== 音频引擎 =====================
+let audioCtx = null;
+let masterGain = null;
+let analyser = null;
+let reverbNode = null;   // { input, dry, wet, output }
+
+/** 初始化 Web Audio 上下文和主音频链 */
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // 分析器节点
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.75;
+
+  // 主增益
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.7;
+
+  // 构建混响：用多个不同延迟的 DelayNode 模拟早期反射
+  reverbNode = createReverb();
+
+  // 音频链: reverbOutput → masterGain → analyser → destination
+  reverbNode.output.connect(masterGain);
+  masterGain.connect(analyser);
+  analyser.connect(audioCtx.destination);
+}
+
+/** 简易混响：多路短延迟 + 低通滤波 + 微弱反馈 */
+function createReverb() {
+  const input = audioCtx.createGain();
+  const dry = audioCtx.createGain();
+  dry.gain.value = 0.65;
+  const output = audioCtx.createGain();
+  output.gain.value = 1.0;
+
+  input.connect(dry);
+  dry.connect(output);
+
+  const delayTimes = [0.032, 0.048, 0.063, 0.079, 0.095];
+  delayTimes.forEach((t, i) => {
+    const delay = audioCtx.createDelay(0.2);
+    delay.delayTime.value = t;
+    const fbGain = audioCtx.createGain();
+    fbGain.gain.value = 0.12 - i * 0.018;
+    const lp = audioCtx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 4000 - i * 350;
+
+    input.connect(delay);
+    delay.connect(fbGain);
+    fbGain.connect(lp);
+    lp.connect(delay);   // feedback loop
+    lp.connect(output);   // wet to output
+  });
+
+  return { input, dry, output };
+}
+
+/** 创建噪声 AudioBuffer（白噪/粉噪/棕噪） */
+function createNoiseBuffer(duration, type) {
+  const sr = audioCtx.sampleRate;
+  const len = Math.max(1, Math.floor(sr * duration));
+  const buf = audioCtx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+
+  if (type === 'pink') {
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+    for (let i=0;i<len;i++) {
+      const w = Math.random()*2-1;
+      b0=0.99886*b0+w*0.0555179;
+      b1=0.99332*b1+w*0.0750759;
+      b2=0.96900*b2+w*0.1538520;
+      b3=0.86650*b3+w*0.3104856;
+      b4=0.55000*b4+w*0.5329522;
+      b5=-0.7616*b5-w*0.0168980;
+      d[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11;
+      b6=w*0.115926;
+    }
+  } else if (type === 'brown') {
+    let last=0;
+    for (let i=0;i<len;i++) {
+      const w=Math.random()*2-1;
+      d[i]=(last+0.02*w)/1.02;
+      last=d[i];
+      d[i]*=3.5;
+    }
+  } else {
+    for (let i=0;i<len;i++) d[i]=Math.random()*2-1;
+  }
+  return buf;
+}
+
+/** 播放一个噪声片段（用于鼓声、雨声等） */
+function playNoise(buf, time, gainVal, duration, filterType, filterFreq) {
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(gainVal, time);
+  g.gain.exponentialRampToValueAtTime(0.001, time + duration);
+  const chain = [g];
+  if (filterType) {
+    const f = audioCtx.createBiquadFilter();
+    f.type = filterType;
+    f.frequency.value = filterFreq;
+    chain.unshift(f);
+  }
+  chain[0].connect(chain[1] || g);
+  (chain[1] || chain[0]).connect(reverbNode.input);
+  src.connect(chain[0]);
+  src.start(time);
+  src.stop(time + duration);
+}
+
+/** 播放一个振荡器音色 */
+function playTone(freq, time, duration, type, gainVal, filterType, filterFreq) {
+  const osc = audioCtx.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, time);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(gainVal, time);
+  g.gain.exponentialRampToValueAtTime(0.001, time + duration);
+  let lastNode = osc;
+  if (filterType) {
+    const f = audioCtx.createBiquadFilter();
+    f.type = filterType;
+    f.frequency.value = filterFreq;
+    lastNode.connect(f);
+    lastNode = f;
+  }
+  lastNode.connect(g);
+  g.connect(reverbNode.input);
+  osc.start(time);
+  osc.stop(time + duration);
+}
+
+// ----- 预生成噪声缓存 -----
+let noiseCache = {};
+function getNoiseCache(type, dur) {
+  const key = type + '_' + dur;
+  if (!noiseCache[key]) noiseCache[key] = createNoiseBuffer(dur, type);
+  return noiseCache[key];
+}
+
+// ----- 鼓声音色 -----
+function kick(time, vol) {
+  vol = vol || 0.8;
+  const f0 = 150, f1 = 35;
+  const dur = 0.25;
+  playTone(f0, time, 0.03, 'sine', vol * 0.7);
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(f0, time);
+  osc.frequency.exponentialRampToValueAtTime(f1, time + 0.08);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(vol, time);
+  g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+  osc.connect(g);
+  g.connect(reverbNode.input);
+  osc.start(time);
+  osc.stop(time + dur);
+}
+
+function snare(time, vol) {
+  vol = vol || 0.55;
+  playNoise(getNoiseCache('white', 0.15), time, vol, 0.15, 'highpass', 1200);
+  playTone(180, time, 0.06, 'triangle', vol * 0.4);
+  playTone(330, time, 0.06, 'sine', vol * 0.2);
+}
+
+function hihat(time, vol) {
+  vol = vol || 0.18;
+  playNoise(getNoiseCache('white', 0.06), time, vol * 0.6, 0.06, 'highpass', 7000);
+}
+
+function openHat(time, vol) {
+  vol = vol || 0.15;
+  playNoise(getNoiseCache('white', 0.15), time, vol, 0.15, 'highpass', 5000);
+}
+
+// ===================== 步进音序器 =====================
+class StepScheduler {
+  constructor(ctx, bpm, totalSteps, stepsPerBeat) {
+    this.ctx = ctx;
+    this.bpm = bpm;
+    this.totalSteps = totalSteps || 16;
+    this.stepsPerBeat = stepsPerBeat || 4;
+    this.stepDur = 60 / bpm / this.stepsPerBeat;
+    this.currentStep = 0;
+    this.nextTime = 0;
+    this.timer = null;
+    this.running = false;
+    this.onStep = null;
+  }
+
+  start(onStep) {
+    this.onStep = onStep;
+    this.running = true;
+    this.nextTime = this.ctx.currentTime + 0.05;
+    this.currentStep = 0;
+    this._tick();
+  }
+
+  _tick() {
+    if (!this.running) return;
+    while (this.nextTime < this.ctx.currentTime + 0.15) {
+      this.onStep(this.currentStep, this.nextTime, this.totalSteps);
+      this.currentStep = (this.currentStep + 1) % this.totalSteps;
+      this.nextTime += this.stepDur;
+    }
+    this.timer = setTimeout(() => this._tick(), 25);
+  }
+
+  stop() {
+    this.running = false;
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+  }
+}
+
+// ===================== 歌曲定义 =====================
+// 每首歌有：id, name, tags, bpm, steps, colors(用于封面), schedule(step,time,totalSteps)
+
+/** 1. Lo-fi Study Beats — 低保真学习节拍 */
+function createLofiStudy() {
+  const bassNotes = [NOTE.C2, NOTE.E2, NOTE.A2, NOTE.G2];
+  const melNotes = [NOTE.C4, NOTE.Eb4, NOTE.F4, NOTE.G4, NOTE.Bb4, NOTE.G4, NOTE.F4, NOTE.Eb4,
+                     NOTE.C4, NOTE.Eb4, NOTE.G4, NOTE.F4, NOTE.Eb4, NOTE.C4, NOTE.D4, NOTE.Eb4];
+  const bufVinyl = getNoiseCache('pink', 0.5);
+  let melIdx = 0;
+  return function(step, time, total) {
+    const beat = step % 4;
+    // Kick: steps 0, 8
+    if (step === 0 || step === 8) kick(time, 0.65);
+    // Snare (soft): steps 4, 12
+    if (step === 4 || step === 12) snare(time, 0.35);
+    // Hi-hat: every other step
+    if (step % 2 === 0) hihat(time, 0.12);
+    // Bass: change note every 4 steps
+    if (beat === 0) {
+      playTone(bassNotes[step / 4 % 4], time, 0.7, 'triangle', 0.25, 'lowpass', 600);
+    }
+    // Melody: every 2 steps
+    if (step % 2 === 0) {
+      playTone(melNotes[melIdx % melNotes.length], time, 0.3, 'sawtooth', 0.08, 'lowpass', 2000);
+      melIdx++;
+    }
+    // Vinyl crackle (very subtle)
+    if (step % 3 === 0) {
+      playNoise(bufVinyl, time, 0.04, 0.3, 'highpass', 4000);
+    }
+  };
+}
+
+/** 2. Deep Focus — 深度专注 */
+function createDeepFocus() {
+  const chordNotes = [NOTE.C3, NOTE.E3, NOTE.G3, NOTE.C4];
+  return function(step, time, total) {
+    // Sparse kick on step 0 only
+    if (step === 0 && Math.random() < 0.5) kick(time, 0.3);
+    // Sustained sine pad: chord held across multiple steps
+    if (step % 8 === 0) {
+      chordNotes.forEach(n => {
+        playTone(n, time, 2.5, 'sine', 0.06, 'lowpass', 800);
+      });
+    }
+    // Brown noise floor
+    if (step === 0) {
+      playNoise(getNoiseCache('brown', 2.0), time, 0.08, 2.0, 'lowpass', 300);
+    }
+    // Bell tone: step 0 and 8
+    if (step === 0 || step === 8) {
+      playTone(NOTE.C5, time, 1.2, 'sine', 0.07);
+      playTone(NOTE.G5, time + 0.03, 1.0, 'sine', 0.05);
+    }
+    // Subtle LFO movement (naturally from overlapping sine phases)
+    if (step % 4 === 0) {
+      playTone(NOTE.E4, time, 1.8, 'sine', 0.04, 'lowpass', 600);
+    }
+  };
+}
+
+/** 3. Rainy Day Blues — 雨天忧郁 */
+function createRainyDay() {
+  const rainBuf = getNoiseCache('white', 1.5);
+  const melNotes = [NOTE.Eb3,NOTE.F3,NOTE.G3,NOTE.Ab3,NOTE.Bb3,NOTE.C4,NOTE.Bb3,NOTE.Ab3,
+                     NOTE.G3,NOTE.F3,NOTE.Eb3,NOTE.D3,NOTE.Eb3,NOTE.G3,NOTE.Bb3,NOTE.Ab3];
+  let melIdx = 0;
+  return function(step, time, total) {
+    // Continuous rain
+    if (step % 4 === 0) playNoise(rainBuf, time, 0.12, 2.0, 'lowpass', 2000);
+    // Melody with reverb feel
+    if (step % 3 === 0) {
+      playTone(melNotes[melIdx % melNotes.length], time, 0.6, 'triangle', 0.12, 'lowpass', 1500);
+      melIdx++;
+    }
+    // Soft ambient pad
+    if (step === 0) {
+      [NOTE.C3, NOTE.Eb3, NOTE.G3].forEach(n => {
+        playTone(n, time, 4.0, 'sine', 0.05, 'lowpass', 500);
+      });
+    }
+    // Occasional thunder rumble
+    if (step === 4 && Math.random() < 0.3) {
+      playTone(40, time, 2.5, 'sine', 0.25, 'lowpass', 200);
+    }
+  };
+}
+
+/** 4. Party Energy — 派对能量 */
+function createPartyEnergy() {
+  const bassNote = NOTE.C2;
+  const stabNotes = [NOTE.C3, NOTE.G3, NOTE.C4];
+  return function(step, time, total) {
+    const beat = step % 4;
+    // Four-on-the-floor kick
+    if (beat === 0) kick(time, 0.9);
+    // Snare on 2 and 4
+    if (beat === 2) snare(time, 0.7);
+    // Open hi-hat on offbeats
+    if (beat === 1 || beat === 3) openHat(time, 0.22);
+    // Hi-hat 16th notes
+    hihat(time, 0.1);
+    // Saw bass every 8th note
+    if (step % 2 === 0) {
+      playTone(bassNote, time, 0.15, 'sawtooth', 0.35, 'lowpass', 400);
+    }
+    // Synth stab on steps 0 and 8
+    if (step === 0 || step === 8) {
+      stabNotes.forEach((n, i) => {
+        playTone(n, time + i * 0.01, 0.2, 'sawtooth', 0.12, 'lowpass', 3000);
+      });
+    }
+    // Filter sweep effect on step 0
+    if (step === 0) {
+      playTone(NOTE.C3, time, 0.8, 'sawtooth', 0.08, 'lowpass', 800);
+    }
+  };
+}
+
+/** 5. Happy Vibes — 快乐氛围 */
+function createHappyVibes() {
+  const arpNotes = [NOTE.C4, NOTE.E4, NOTE.G4, NOTE.C5, NOTE.G4, NOTE.E4];
+  const leadNotes = [NOTE.E4,NOTE.G4,NOTE.A4,NOTE.G4,NOTE.E4,NOTE.D4,NOTE.C4,NOTE.D4,
+                      NOTE.E4,NOTE.G4,NOTE.C5,NOTE.A4,NOTE.G4,NOTE.E4,NOTE.D4,NOTE.C4];
+  let arpIdx = 0, leadIdx = 0;
+  return function(step, time, total) {
+    const beat = step % 4;
+    // Kick pattern
+    if (step === 0 || step === 6 || step === 8 || step === 14) kick(time, 0.7);
+    // Snare on 4 and 12
+    if (step === 4 || step === 12) snare(time, 0.55);
+    // Hi-hat pattern
+    if (step % 3 !== 2) hihat(time, 0.14);
+    // Arpeggio
+    if (step % 2 === 0) {
+      playTone(arpNotes[arpIdx % arpNotes.length], time, 0.12, 'square', 0.1, 'lowpass', 4000);
+      arpIdx++;
+    }
+    // Lead melody every 2 steps
+    if (step % 2 === 1) {
+      playTone(leadNotes[leadIdx % leadNotes.length], time, 0.25, 'square', 0.11);
+      leadIdx++;
+    }
+  };
+}
+
+/** 6. Midnight Drive — 午夜兜风 */
+function createMidnightDrive() {
+  const bassGroove = [NOTE.C2, NOTE.C2, NOTE.Eb2, NOTE.F2, NOTE.G2, NOTE.F2, NOTE.Eb2, NOTE.C2];
+  const padNotes = [NOTE.C3, NOTE.Eb3, NOTE.G3, NOTE.Bb3];
+  let bassIdx = 0;
+  return function(step, time, total) {
+    const beat = step % 4;
+    // Kick
+    if (beat === 0) kick(time, 0.75);
+    // Snare with extra reverb feel
+    if (beat === 2) {
+      snare(time, 0.5);
+      playTone(200, time + 0.05, 0.4, 'sine', 0.08);
+    }
+    // Offbeat hi-hat
+    if (beat === 1 || beat === 3) hihat(time, 0.16);
+    // Bass groove every 2 steps
+    if (step % 2 === 0) {
+      playTone(bassGroove[bassIdx % bassGroove.length], time, 0.35, 'sawtooth', 0.22, 'lowpass', 500);
+      bassIdx++;
+    }
+    // Pad chord every 8 steps
+    if (step % 8 === 0) {
+      padNotes.forEach(n => playTone(n, time, 3.5, 'sawtooth', 0.06, 'lowpass', 1000));
+    }
+    // Atmospheric high note
+    if (step % 6 === 0) {
+      playTone(NOTE.C5, time, 1.0, 'sine', 0.05);
+    }
+  };
+}
+
+// 歌曲列表
+const SONGS = [
+  { id:'lofi-study',   name:'Lo-fi Study Beats',   tags:['chill','lofi'],       bpm:75,  steps:16, colors:['#f59e0b','#ef4444','#f97316'],
+    create: createLofiStudy },
+  { id:'deep-focus',   name:'Deep Focus',           tags:['focus'],              bpm:60,  steps:8,  colors:['#3b82f6','#6366f1','#8b5cf6'],
+    create: createDeepFocus },
+  { id:'rainy-blues',  name:'Rainy Day Blues',      tags:['rainy'],              bpm:65,  steps:16, colors:['#6b7280','#3b82f6','#94a3b8'],
+    create: createRainyDay },
+  { id:'party-energy', name:'Party Energy',         tags:['energetic'],          bpm:128, steps:16, colors:['#ec4899','#f59e0b','#ef4444'],
+    create: createPartyEnergy },
+  { id:'happy-vibes',  name:'Happy Vibes',          tags:['happy'],              bpm:110, steps:16, colors:['#06b6d4','#10b981','#34d399'],
+    create: createHappyVibes },
+  { id:'midnight',     name:'Midnight Drive',       tags:['chill','lofi'],       bpm:85,  steps:16, colors:['#8b5cf6','#a855f7','#d946ef'],
+    create: createMidnightDrive },
+];
+
+// ===================== 播放器状态 =====================
+let currentSongIdx = 0;
+let isPlaying = false;
+let scheduler = null;
+let songStartTime = 0;
+const SONG_DURATION = 180; // 每首模拟播放 3 分钟
+let progressInterval = null;
+
+// ===================== 播放器控制 =====================
+function getCurrentSong() { return SONGS[currentSongIdx]; }
+
+function switchSong(idx) {
+  const wasPlaying = isPlaying;
+  stopPlayback();
+  currentSongIdx = idx;
+  updateAlbumArt();
+  updateSongInfo();
+  updateSongPills();
+  updateDanmakuTheme();
+  if (wasPlaying) startPlayback();
+}
+
+function startPlayback() {
+  initAudio();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  stopPlayback(); // 确保清理旧状态
+
+  const song = getCurrentSong();
+  scheduler = new StepScheduler(audioCtx, song.bpm, song.steps, 4);
+  const scheduleFn = song.create();
+  scheduler.start(scheduleFn);
+
+  isPlaying = true;
+  songStartTime = Date.now();
+  updatePlayButton();
+  startProgress();
+  startDanmaku();
+  startVisualizer();
+
+  // 添加 Agent 播放提示
+  if (document.getElementById('chat-messages').children.length <= 1) {
+    addAgentMessage('🎵 开始播放 <b>' + song.name + '</b>，让音乐陪伴你吧~');
+  }
+}
+
+function stopPlayback() {
+  if (scheduler) { scheduler.stop(); scheduler = null; }
+  if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+  isPlaying = false;
+  updatePlayButton();
+}
+
+function togglePlay() {
+  if (isPlaying) { stopPlayback(); stopDanmaku(); }
+  else { startPlayback(); }
+}
+
+function nextSong() { switchSong((currentSongIdx + 1) % SONGS.length); }
+function prevSong() { switchSong((currentSongIdx - 1 + SONGS.length) % SONGS.length); }
+
+function setVolume(val) {
+  const v = val / 100;
+  if (masterGain) {
+    masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    masterGain.gain.setValueAtTime(v, audioCtx.currentTime);
+  }
+}
+
+function updatePlayButton() {
+  const btn = document.getElementById('btn-play');
+  btn.textContent = isPlaying ? '⏸️' : '▶️';
+}
+
+function startProgress() {
+  if (progressInterval) clearInterval(progressInterval);
+  progressInterval = setInterval(() => {
+    if (!isPlaying) return;
+    const elapsed = (Date.now() - songStartTime) / 1000;
+    const pct = Math.min(100, (elapsed / SONG_DURATION) * 100);
+    document.getElementById('progress-fill').style.width = pct + '%';
+    const mins = Math.floor(elapsed / 60);
+    const secs = Math.floor(elapsed % 60);
+    document.getElementById('progress-current').textContent = mins + ':' + String(secs).padStart(2, '0');
+    // 模拟时长结束自动切歌
+    if (pct >= 100) nextSong();
+  }, 250);
+}
+
+// ===================== 专辑封面绘制 =====================
+function updateAlbumArt() {
+  const canvas = document.getElementById('album-art');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const colors = getCurrentSong().colors;
+
+  // 用三色渐变绘制抽象图案
+  const grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, colors[0]);
+  grad.addColorStop(0.5, colors[1]);
+  grad.addColorStop(1, colors[2]);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // 叠加几何形状
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(w * 0.3, h * 0.35, w * 0.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(w * 0.7, h * 0.6, w * 0.18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#000000';
+  ctx.beginPath();
+  ctx.arc(w * 0.55, h * 0.5, w * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 细线装饰
+  ctx.globalAlpha = 0.2;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath();
+    ctx.arc(w * 0.5, h * 0.5, w * (0.15 + i * 0.08), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // 歌名文字
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px Inter, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = colors[0];
+  ctx.shadowBlur = 12;
+  ctx.fillText(getCurrentSong().name, w / 2, h - 30);
+  ctx.shadowBlur = 0;
+}
+
+function updateSongInfo() {
+  const s = getCurrentSong();
+  document.getElementById('song-name').textContent = s.name;
+  document.getElementById('song-tags').textContent = s.tags.map(t => '#' + t).join(' ');
+}
+
+// ===================== 歌曲标签 pills =====================
+function buildSongPills() {
+  const container = document.getElementById('song-pills');
+  container.innerHTML = '';
+  SONGS.forEach((s, i) => {
+    const pill = document.createElement('span');
+    pill.className = 'song-pill';
+    pill.textContent = s.name;
+    if (i === currentSongIdx) pill.classList.add('active');
+    pill.addEventListener('click', () => switchSong(i));
+    container.appendChild(pill);
+  });
+}
+
+function updateSongPills() {
+  document.querySelectorAll('.song-pill').forEach((p, i) => {
+    p.classList.toggle('active', i === currentSongIdx);
+  });
+}
+
+// ===================== 可视化器 =====================
+let visAnimId = null;
+let particles = [];
+
+function startVisualizer() {
+  if (visAnimId) return;
+  function draw() {
+    visAnimId = requestAnimationFrame(draw);
+    drawSpectrum();
+  }
+  draw();
+}
+
+function stopVisualizer() {
+  if (visAnimId) { cancelAnimationFrame(visAnimId); visAnimId = null; }
+}
+
+function drawSpectrum() {
+  const canvas = document.getElementById('visualizer');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+
+  // 半透明黑色清屏，制造残影效果
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.fillRect(0, 0, w, h);
+
+  if (!analyser) return;
+
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  analyser.getByteFrequencyData(dataArray);
+
+  const barCount = 64;
+  const barWidth = (w / barCount) * 0.85;
+  const gap = (w / barCount) * 0.15;
+  const colors = getCurrentSong().colors;
+
+  for (let i = 0; i < barCount; i++) {
+    // 取对应频率段的平均值
+    const startBin = Math.floor(i * bufferLength / barCount);
+    const endBin = Math.floor((i + 1) * bufferLength / barCount);
+    let sum = 0;
+    for (let j = startBin; j < endBin; j++) sum += dataArray[j];
+    const avg = sum / (endBin - startBin);
+    const barHeight = (avg / 255) * h * 0.85;
+
+    // 渐变色
+    const t = i / barCount;
+    const r = Math.floor(parseInt(colors[0].slice(1,3), 16) * (1-t) + parseInt(colors[1].slice(1,3), 16) * t);
+    const g = Math.floor(parseInt(colors[0].slice(3,5), 16) * (1-t) + parseInt(colors[1].slice(3,5), 16) * t);
+    const b = Math.floor(parseInt(colors[0].slice(5,7), 16) * (1-t) + parseInt(colors[1].slice(5,7), 16) * t);
+
+    const x = i * (barWidth + gap);
+    const y = h - barHeight;
+
+    // 发光效果：先画宽模糊版本
+    ctx.shadowColor = `rgb(${r},${g},${b})`;
+    ctx.shadowBlur = 8;
+
+    // 柱状图主体
+    const barGrad = ctx.createLinearGradient(x, y, x, h);
+    barGrad.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
+    barGrad.addColorStop(1, `rgba(${r},${g},${b},0.2)`);
+    ctx.fillStyle = barGrad;
+    ctx.fillRect(x, y, barWidth, barHeight);
+
+    // 顶部亮线
+    ctx.fillStyle = `rgba(${r},${g},${b},1)`;
+    ctx.fillRect(x, y, barWidth, 2);
+
+    ctx.shadowBlur = 0;
+  }
+
+  // 粒子系统
+  if (particles.length < 80) {
+    const i = Math.floor(Math.random() * barCount);
+    const startBin = Math.floor(i * bufferLength / barCount);
+    let sum = 0;
+    for (let j = startBin; j < Math.floor((i + 1) * bufferLength / barCount); j++) sum += dataArray[j];
+    if (sum / (bufferLength / barCount) > 60) {
+      const x = i * (barWidth + gap) + barWidth / 2;
+      const y = h - (sum / (bufferLength / barCount) / 255) * h * 0.85;
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: -Math.random() * 2 - 0.5,
+        life: 1,
+        decay: 0.008 + Math.random() * 0.02,
+        size: 1.5 + Math.random() * 2.5,
+        color: colors[Math.floor(Math.random() * colors.length)],
+      });
+    }
+  }
+
+  // 更新和绘制粒子
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= p.decay;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ===================== 弹幕系统 =====================
+const DANMAKU_PRESETS = {
+  chill:  ['这节奏好chill~', 'lo-fi 氛围拉满', '舒服了', '下班后的治愈时刻', '耳朵怀孕了', '循环一整天'],
+  focus:  ['专注力 MAX', '效率翻倍中...', '进入心流 ✨', '深度工作模式 ON', '键盘敲出节奏感', '代码写得飞起'],
+  rainy:  ['下雨天最适合发呆', '雨声好治愈 🌧️', '窗外的雨和耳机里的歌', '适合想念的天气', '氛围感拉满'],
+  energetic: ['燃起来了 🔥', '这贝斯太顶了', '原地起飞', '音量拉满！', '今晚不蹦迪明天变垃圾', '颅内高潮'],
+  happy:  ['好心情加载中...', '跟着节奏摇摆 💃', '阳光明媚的旋律', '不自觉嘴角上扬', '世界都明亮了'],
+  lofi:   ['lo-fi 才是归宿', '这采样绝了', '专注必备背景音', '复古质感满分', 'beat 太上头'],
+  default: ['VibeFlow 进行中...', '音浪太强 🎵', '赛博修仙中', '这波推荐可以', '氛围拿捏了'],
+};
+
+let danmakuTimer = null;
+let danmakuTheme = 'default';
+
+function updateDanmakuTheme() {
+  const tags = getCurrentSong().tags;
+  danmakuTheme = tags.find(t => DANMAKU_PRESETS[t]) || 'default';
+}
+
+function getRandomDanmaku() {
+  const pool = DANMAKU_PRESETS[danmakuTheme] || DANMAKU_PRESETS['default'];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function spawnDanmaku(text, color) {
+  const layer = document.getElementById('danmaku-layer');
+  const el = document.createElement('span');
+  el.className = 'danmaku-item';
+  el.textContent = text;
+
+  // 随机视觉参数
+  const colors = ['#a855f7','#06b6d4','#ec4899','#f59e0b','#10b981','#f97316','#e0e0f8','#ff69b4'];
+  const c = color || colors[Math.floor(Math.random() * colors.length)];
+  el.style.color = c;
+  el.style.fontSize = (14 + Math.random() * 12) + 'px';
+  el.style.opacity = (0.7 + Math.random() * 0.3);
+
+  // 随机纵向位置（在弹幕层高度范围内）
+  const top = Math.random() * 130;
+  el.style.top = top + 'px';
+
+  layer.appendChild(el);
+
+  // 使用 requestAnimationFrame 驱动从右到左移动
+  const startTime = performance.now();
+  const duration = 5000 + Math.random() * 4000;
+  const startX = window.innerWidth;
+  const endX = -(el.offsetWidth + 50);
+  el.style.left = startX + 'px';
+
+  function animate(now) {
+    const elapsed = now - startTime;
+    const progress = Math.min(1, elapsed / duration);
+    if (progress >= 1) { el.remove(); return; }
+    el.style.left = (startX + progress * (endX - startX)) + 'px';
+    requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+}
+
+function startDanmaku() {
+  stopDanmaku();
+  updateDanmakuTheme();
+  danmakuTimer = setInterval(() => {
+    if (isPlaying) spawnDanmaku(getRandomDanmaku());
+  }, 2000 + Math.random() * 2500);
+}
+
+function stopDanmaku() {
+  if (danmakuTimer) { clearInterval(danmakuTimer); danmakuTimer = null; }
+}
+
+// ===================== Agent 聊天系统 =====================
+const AGENT_RULES = [
+  { keywords: ['专注','focus','学习','study','工作','work','集中','效率'],
+    songIdx: 1, // Deep Focus
+    responses: [
+      '我懂你，专注的状态最珍贵 ✨ 这就为你切换到深度专注模式，帮你进入心流。',
+      '好的！工作需要好音乐陪伴，这首 Deep Focus 用极简的环境音垫帮你屏蔽外界干扰。',
+      '明白，学习和工作的最佳搭档来了 🎧 低频氛围 + 柔和钟鸣，专注力拉满。',
+    ]},
+  { keywords: ['下雨','rain','雨','忧郁','安静','emo','难过','伤感'],
+    songIdx: 2, // Rainy Day Blues
+    responses: [
+      '下雨天最适合一个人静静待着了 🌧️ 来一首 Rainy Day Blues，让雨声包裹你。',
+      '隔着窗听雨声的那种安全感，我帮你用音乐还原了。白噪雨声 + 柔光旋律，很治愈。',
+      '抱抱你 🫂 这首雨天氛围音乐，把窗外的雨搬进耳机里。',
+    ]},
+  { keywords: ['派对','party','嗨','蹦迪','燃','炸','兴奋','energy'],
+    songIdx: 3, // Party Energy
+    responses: [
+      '气氛组就位！🔥 128 BPM 的 Party Energy，四拍底鼓直接炸场！',
+      '今晚不嗨不归！这首派对能量直接拉满贝斯和鼓组，音量开大！',
+      '燃起来了！⚡ 锯齿波贝斯 + 动感鼓组，在家也能蹦迪！',
+    ]},
+  { keywords: ['开心','happy','快乐','好心情','高兴','欢快'],
+    songIdx: 4, // Happy Vibes
+    responses: [
+      '好心情就要配好音乐！🌈 Happy Vibes 用明亮的大调琶音帮你把快乐放大。',
+      '看你心情不错嘛~ 这首欢快电子乐，阳光感和节奏感都拉满！',
+      '快乐是会传染的！💖 来感受这波明快合成器 + 跳动脉冲的快乐能量。',
+    ]},
+  { keywords: ['放松','chill','休息','躺','懒','relax','放空'],
+    songIdx: 0, // Lo-fi Study Beats
+    responses: [
+      '累了就歇会儿，让 lo-fi 节拍治愈你 🎵 低保真质感 + 轻鼓点，松弛感满分。',
+      '生活不用一直绷着~ 来一首 Lo-fi Study Beats，黑胶质感 + 柔和律动。',
+      '放空模式开启 ☁️ 这首 lo-fi 有经典的温暖底噪，像老唱片在播放。',
+    ]},
+  { keywords: ['夜晚','night','开车','兜风','drive','夜','晚'],
+    songIdx: 5, // Midnight Drive
+    responses: [
+      '午夜兜风的氛围太绝了 🌙 合成器贝斯 + 复古军鼓，像在霓虹隧道里穿行。',
+      '夜晚属于音乐和公路 🚗 Midnight Drive 带你驶入赛博朋克的夜色中。',
+      '摇下车窗吹晚风，这首就是你的BGM。深沉律动 + 氛围铺底，绝了。',
+    ]},
+  { keywords: ['推荐','来一首','放首歌','推荐一首','随便','来点'],
+    songIdx: -1, // 随机
+    responses: [
+      '选不出来？那就随机来一首！🎲 交给我吧~',
+      '好嘞，给你挑一首我最近最喜欢的~ 🎶',
+      '每首都好听，但我给你挑个最合适的！✨',
+    ]},
+];
+
+function addAgentMessage(text) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'chat-msg agent';
+  div.innerHTML = text;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function addUserMessage(text) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'chat-msg user';
+  div.textContent = text;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function processChatInput(text) {
+  if (!text.trim()) return;
+  const input = text.trim();
+
+  // 弹幕指令
+  if (input.startsWith('/danmu') || input.startsWith('/弹幕')) {
+    const content = input.replace(/^\/(danmu|弹幕)\s*/, '');
+    if (content) {
+      addUserMessage(input);
+      spawnDanmaku(content, '#ff69b4');
+      addAgentMessage('✨ 弹幕已发送：「' + content + '」');
+    } else {
+      addUserMessage(input);
+      addAgentMessage('用法：<b>/danmu 你想说的话</b>，例如 /danmu 这歌太好听了！');
+    }
+    return;
+  }
+
+  addUserMessage(input);
+
+  // 关键词匹配
+  let matchedRule = null;
+  for (const rule of AGENT_RULES) {
+    if (rule.keywords.some(kw => input.toLowerCase().includes(kw.toLowerCase()))) {
+      matchedRule = rule;
+      break;
+    }
+  }
+
+  if (!matchedRule) {
+    // 没有匹配，给通用回复
+    addAgentMessage(
+      '嗯…我暂时不太确定你的心情 😊 试试用「专注」「放松」「派对」「下雨」「开心」「夜晚」这样的词描述一下？<br><br>' +
+      '或者你也可以直接点击右侧的歌名标签来切换音乐~<br>' +
+      '输入 <b>/danmu 内容</b> 还可以发送弹幕哦！'
+    );
+    return;
+  }
+
+  // 选回复语
+  const resp = matchedRule.responses[Math.floor(Math.random() * matchedRule.responses.length)];
+
+  // 确定歌曲
+  let songIdx = matchedRule.songIdx;
+  if (songIdx === -1) songIdx = Math.floor(Math.random() * SONGS.length);
+  const song = SONGS[songIdx];
+
+  // 构造回复（含推荐卡片）
+  const respHTML = resp + '<br><span class="song-rec" data-song="' + songIdx + '">🎵 ' + song.name + ' — ' + song.tags.map(t => '#' + t).join(' ') + '</span>';
+
+  addAgentMessage(respHTML);
+
+  // 自动播放推荐歌曲
+  switchSong(songIdx);
+  if (!isPlaying) startPlayback();
+
+  // 绑定推荐卡片点击
+  const lastMsg = document.getElementById('chat-messages').lastElementChild;
+  const rec = lastMsg.querySelector('.song-rec');
+  if (rec) {
+    rec.addEventListener('click', function() {
+      const idx = parseInt(this.dataset.song);
+      switchSong(idx);
+      if (!isPlaying) startPlayback();
+    });
+  }
+}
+
+// ===================== 事件绑定 =====================
+document.getElementById('btn-play').addEventListener('click', togglePlay);
+document.getElementById('btn-prev').addEventListener('click', prevSong);
+document.getElementById('btn-next').addEventListener('click', nextSong);
+
+document.getElementById('volume-slider').addEventListener('input', function() {
+  setVolume(this.value);
+});
+
+document.getElementById('chat-send').addEventListener('click', function() {
+  const input = document.getElementById('chat-input');
+  processChatInput(input.value);
+  input.value = '';
+});
+
+document.getElementById('chat-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    const input = document.getElementById('chat-input');
+    processChatInput(input.value);
+    input.value = '';
+  }
+});
+
+// 进度条点击跳转
+document.getElementById('progress-bar').addEventListener('click', function(e) {
+  if (!isPlaying) return;
+  const rect = this.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  // 模拟跳转：重置开始时间
+  songStartTime = Date.now() - pct * SONG_DURATION * 1000;
+});
+
+// 键盘快捷键：空格播放/暂停，左右箭头切歌
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT') return; // 不在输入框中响应
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  if (e.code === 'ArrowRight') { e.preventDefault(); nextSong(); }
+  if (e.code === 'ArrowLeft') { e.preventDefault(); prevSong(); }
+});
+
+// ===================== 初始化 =====================
+function init() {
+  buildSongPills();
+  updateAlbumArt();
+  updateSongInfo();
+  updateDanmakuTheme();
+
+  // 启动弹幕（即使未播放，也给用户看到氛围）
+  startDanmaku();
+  startVisualizer();
+
+  // 欢迎弹幕
+  setTimeout(() => spawnDanmaku('欢迎来到 VibeFlow 🎵', '#a855f7'), 500);
+  setTimeout(() => spawnDanmaku('告诉我你的心情吧~', '#06b6d4'), 1500);
+  setTimeout(() => spawnDanmaku('试试输入「我需要专注」', '#ec4899'), 2800);
+}
+
+init();
+</script>
+</body>
+</html>
